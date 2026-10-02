@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Terraza - Preparatoria Estado de México</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
+<style>
+:root{--bg:#f3f6f5;--card:#fff;--tx:#18262c;--mut:#5d6f76;--line:#d8e1e0;--ac:#0f6b66;--ok:#1f8a4c;--pen:#c47a0c}
+@media(prefers-color-scheme:dark){:root{--bg:#10191b;--card:#172326;--tx:#e6eff0;--mut:#93a8ad;--line:#27383c;--ac:#4fc0b8;--ok:#4cc27f;--pen:#e6a23c}}
+*{box-sizing:border-box}
+body{margin:0;font:15px/1.4 Georgia,'Times New Roman',serif;background:var(--bg);color:var(--tx)}
+header{display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;padding:12px 16px;background:var(--card);border-bottom:1px solid var(--line)}
+h1{font-size:20px;margin:0}
+main{padding:16px;max-width:1100px;margin:auto}
+button{font:inherit;font-size:14px;border:1px solid var(--line);background:var(--card);color:var(--tx);border-radius:6px;padding:6px 10px;cursor:pointer}
+button:focus-visible{outline:2px solid var(--ac);outline-offset:2px}
+button.p{background:var(--ac);color:var(--bg);border-color:var(--ac)}
+.bar{display:flex;gap:10px;align-items:center;justify-content:center;margin-bottom:12px}
+.wrap{overflow-x:auto}
+table{border-collapse:collapse;width:100%;min-width:720px;background:var(--card)}
+th,td{border:1px solid var(--line);padding:6px;vertical-align:top;font-size:14px;text-align:left}
+th{background:var(--bg)}
+td.h{white-space:nowrap;color:var(--mut);width:96px}
+.r{border-left:4px solid var(--pen);padding-left:6px}
+.r.aprobada{border-color:var(--ok)}
+.t{color:var(--mut);font-size:13px}
+.a{display:flex;gap:4px;margin-top:4px;flex-wrap:wrap}
+.a button{padding:2px 8px;font-size:13px}
+.c{text-align:center;padding:20vh 16px 0}
+</style>
+</head>
+<body>
+<div id="app"></div>
+<script>
+// 1) Pega aquí los datos de tu proyecto de Supabase
+const SUPABASE_URL = 'NEXT_PUBLIC_SUPABASE_URL=https://ntclrekdpylswbdlsvri.supabase.co';
+const SUPABASE_KEY = 'NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=sb_publishable_deYpkwjVsejWKtlQ8bP2Wg_zvgaQ6p7';
+const DOMINIO = 'pem.edu.mx';
+
+const db = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+const $ = id => document.getElementById(id);
+const DIAS = ['Lun', 'Mar', 'Mié', 'Jue', 'Vie'];
+const esc = s => String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const iso = d => d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
+const suma = (d, n) => { const x = new Date(d); x.setDate(x.getDate() + n); return x; };
+const hhmm = t => t.slice(0, 5);
+function lunesDe(d) {
+  d = new Date(d); d.setHours(0,0,0,0);
+  const w = (d.getDay() + 6) % 7;
+  d.setDate(d.getDate() - w + (w >= 5 ? 7 : 0));
+  return d;
+}
+let yo = null, bloques = [], lunes = lunesDe(new Date());
+const esCoord = () => yo && ['coordinadora', 'subdirector'].includes(yo.rol);
+
+function login(msg) {
+  $('app').innerHTML = '<div class="c"><h1>Terraza de la Preparatoria Estado de México</h1><p class="t" id="m"></p><button class="p" id="go">Entrar con Google</button></div>';
+  $('m').textContent = msg || 'Entra con tu correo institucional.';
+  $('go').onclick = () => db.auth.signInWithOAuth({
+    provider: 'google',
+    options: { redirectTo: location.origin, queryParams: { hd: DOMINIO } }
+  });
+}
+
+async function init() {
+  const url = new URLSearchParams(location.search + '&' + location.hash.slice(1));
+  const {data: {session}} = await db.auth.getSession();
+  if (!session) return login(url.get('error_description') ? 'No se pudo entrar. Usa tu correo @' + DOMINIO : '');
+  const {data: p} = await db.from('perfiles').select('*').eq('id', session.user.id).single();
+  if (!p) { await db.auth.signOut(); return login('Tu cuenta no tiene acceso. Usa tu correo @' + DOMINIO); }
+  yo = p;
+  const {data: b} = await db.from('bloques').select('*').order('numero');
+  bloques = b || [];
+  pintar();
+}
+
+async function pintar() {
+  const fin = suma(lunes, 4);
+  const {data, error} = await db.from('reservas_terraza')
+    .select('id,fecha,bloque,motivo,estado,docente_id,perfiles(nombre)')
+    .in('estado', ['pendiente', 'aprobada'])
+    .gte('fecha', iso(lunes)).lte('fecha', iso(fin));
+  if (error) return alert(error.message);
+  const m = {};
+  (data || []).forEach(r => m[r.fecha + '|' + r.bloque] = r);
+  const hoy = iso(new Date());
+  const fmt = (d, o) => d.toLocaleDateString('es-MX', o);
+  let h = `<header><h1>Terraza</h1><div><span class="t">${esc(yo.nombre)}, ${yo.rol}</span> <button id="out">Salir</button></div></header>
+  <main><div class="bar"><button id="ant" aria-label="Semana anterior">&#9664;</button>
+  <b>${fmt(lunes,{day:'numeric',month:'short'})} al ${fmt(fin,{day:'numeric',month:'short',year:'numeric'})}</b>
+  <button id="sig" aria-label="Semana siguiente">&#9654;</button></div>
+  <div class="wrap"><table><tr><th></th>`;
+  for (let i = 0; i < 5; i++) h += `<th>${DIAS[i]} ${suma(lunes, i).getDate()}</th>`;
+  h += '</tr>';
+  bloques.forEach(b => {
+    h += `<tr><td class="h">${hhmm(b.inicio)} a ${hhmm(b.fin)}</td>`;
+    for (let i = 0; i < 5; i++) {
+      const f = iso(suma(lunes, i)), r = m[f + '|' + b.numero];
+      h += '<td>';
+      if (!r) {
+        if (f >= hoy) h += `<button data-n="${f}|${b.numero}">Apartar</button>`;
+      } else {
+        h += `<div class="r ${r.estado}"><b>${esc(r.perfiles?.nombre || '')}</b><div class="t">${esc(r.motivo || '')} (${r.estado})</div><div class="a">`;
+        if (esCoord() && r.estado === 'pendiente')
+          h += `<button data-e="aprobada" data-id="${r.id}">Aprobar</button><button data-e="rechazada" data-id="${r.id}">Rechazar</button>`;
+        if (esCoord() || r.docente_id === yo.id)
+          h += `<button data-e="cancelada" data-id="${r.id}">Cancelar</button>`;
+        h += '</div></div>';
+      }
+      h += '</td>';
+    }
+    h += '</tr>';
+  });
+  $('app').innerHTML = h + '</table></div></main>';
+}
+
+document.addEventListener('click', async e => {
+  const t = e.target.closest('button');
+  if (!t) return;
+  if (t.id === 'out') { await db.auth.signOut(); location.reload(); }
+  if (t.id === 'ant') { lunes = suma(lunes, -7); pintar(); }
+  if (t.id === 'sig') { lunes = suma(lunes, 7); pintar(); }
+  if (t.dataset.n) {
+    const [f, n] = t.dataset.n.split('|');
+    const motivo = prompt('¿Qué actividad y grupo? (ejemplo: 3A Biología)');
+    if (motivo === null) return;
+    const {error} = await db.from('reservas_terraza').insert({docente_id: yo.id, fecha: f, bloque: +n, motivo});
+    if (error) alert(error.code === '23505' ? 'Ese horario ya fue apartado por alguien más.' : error.message);
+    pintar();
+  }
+  if (t.dataset.e) {
+    if (t.dataset.e === 'cancelada' && !confirm('¿Cancelar este apartado?')) return;
+    const {error} = await db.from('reservas_terraza').update({estado: t.dataset.e}).eq('id', t.dataset.id);
+    if (error) alert(error.message);
+    pintar();
+  }
+});
+
+init();
+</script>
+</body>
+</html>
